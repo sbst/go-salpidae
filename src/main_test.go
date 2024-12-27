@@ -1,10 +1,16 @@
 package main
 
 import (
-	"math"
 	"os"
+	"strings"
 	"testing"
 )
+
+func getFileSize(file *os.File) int64 {
+	info, e := file.Stat()
+	check(e)
+	return info.Size()
+}
 
 func TestReadHalfBlockFullFile(t *testing.T) {
 	fileName := "../../dat2"
@@ -19,13 +25,11 @@ func TestReadHalfBlockFullFile(t *testing.T) {
 
 	f, e := os.Open(fileName)
 	check(e)
-	info, e := f.Stat()
-	check(e)
+	totalBlocks := getNrOfBlocks(getFileSize(f))
+	hashes := make([]string, totalBlocks)
+	read(f, 0, totalBlocks, hashes)
 	e = f.Close()
 	check(e)
-	nrBlocks := int64(math.Ceil(float64(info.Size()) / float64(blockSize)))
-	hashes := make([]string, nrBlocks)
-	read(fileName, 0, nrBlocks, hashes)
 	if len(hashes) != len(expected) {
 		t.Fatalf("Hash size array: %v, expected: %v ", len(hashes), len(expected))
 	}
@@ -47,13 +51,32 @@ func TestReadFullBlockFullFile(t *testing.T) {
 
 	f, e := os.Open(fileName)
 	check(e)
-	info, e := f.Stat()
-	check(e)
+	totalBlocks := getNrOfBlocks(getFileSize(f))
+	hashes := make([]string, totalBlocks)
+	read(f, 0, totalBlocks, hashes)
 	e = f.Close()
 	check(e)
-	nrBlocks := int64(math.Ceil(float64(info.Size()) / float64(blockSize)))
-	hashes := make([]string, nrBlocks)
-	read(fileName, 0, nrBlocks, hashes)
+	if len(hashes) != len(expected) {
+		t.Fatalf("Hash size array: %v, expected: %v ", len(hashes), len(expected))
+	}
+
+	for i := range hashes {
+		if hashes[i] != expected[i] {
+			t.Fatalf("Hash for %v block: %v, expected: %v ", i, hashes[i], expected[i])
+		}
+	}
+}
+
+func TestReadSmallBuffer(t *testing.T) {
+	data := "abcde"
+	totalBlocks := getNrOfBlocks(int64(len(data)))
+	expected := [...]string{
+		"36bbe50ed96841d10443bcb670d6554f0a34b761be67ec9c4a8ad2c0c44ca42c",
+	}
+
+	hashes := make([]string, totalBlocks)
+	reader := strings.NewReader("abcde")
+	read(reader, 0, totalBlocks, hashes)
 	if len(hashes) != len(expected) {
 		t.Fatalf("Hash size array: %v, expected: %v ", len(hashes), len(expected))
 	}
