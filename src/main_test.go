@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -27,6 +28,12 @@ import (
 // 	}
 // 	t.Log(msg)
 // }
+
+func check(e error) {
+	if e != nil {
+		panic(e)
+	}
+}
 
 func isEqual(hashes1 []string, hashes2 []string) (bool, string) {
 	if len(hashes1) != len(hashes2) {
@@ -65,6 +72,32 @@ func TestReadOneByOne(t *testing.T) {
 	}
 }
 
+type customReader struct {
+	cb func() (int, error)
+}
+
+func (e customReader) Read(p []byte) (n int, err error) {
+	return e.cb()
+}
+
+func TestReadError(t *testing.T) {
+	var reader = customReader{
+		cb: func() (int, error) { return 0, errors.New("nope") },
+	}
+
+	hashes := make([]string, 0)
+	e := read(reader, 1, 0, 1, hashes)
+
+	var expected *blockError
+	if errors.As(e, &expected) {
+		if expected.BlockId != 0 {
+			t.Fatalf("Error in block: %v, expected: 0", expected.BlockId)
+		}
+	} else {
+		t.Fatal("Error expected")
+	}
+}
+
 func TestReadSmallBuffer(t *testing.T) {
 	data := "abcde"
 	var blockSize int64 = 1024 * 1024
@@ -93,7 +126,10 @@ func TestReadFile(t *testing.T) {
 		"cf745822a74607477bdb7e7a952941098fd09692c64b7c468d115b1c1a5fdace",
 		"dcf2c240d59f12c3fda471fc54d4451184c90f08981556f61657b51453ab5f7a",
 	}
-	hashes := readFile(fileName, blockSize, 2)
+	hashes, e := readFile(fileName, blockSize, 1)
+	if e != nil {
+		t.Fatalf("Error: %v", e.Error())
+	}
 	equal, msg := isEqual(hashes, expected)
 	if !equal {
 		t.Fatal(msg)
@@ -109,7 +145,10 @@ func TestReadFileFullBlockFullFile(t *testing.T) {
 		"e8f1614c60cb143a301b3fc3a9f039a7c10cca6c8a64cd6f52624fdf06970303",
 	}
 
-	hashes := readFile(fileName, blockSize, 1)
+	hashes, e := readFile(fileName, blockSize, 1)
+	if e != nil {
+		t.Fatalf("Error: %v", e.Error())
+	}
 	equal, msg := isEqual(hashes, expected)
 	if !equal {
 		t.Fatal(msg)
@@ -120,8 +159,14 @@ func TestReadFileMultipleThreads(t *testing.T) {
 	fileName := "../../dat"
 	var blockSize int64 = 1024 * 1024
 
-	hashes1 := readFile(fileName, blockSize, 1)
-	hashes2 := readFile(fileName, blockSize, 100)
+	hashes1, e := readFile(fileName, blockSize, 1)
+	if e != nil {
+		t.Fatalf("Error: %v", e.Error())
+	}
+	hashes2, e := readFile(fileName, blockSize, 100)
+	if e != nil {
+		t.Fatalf("Error: %v", e.Error())
+	}
 	equal, msg := isEqual(hashes1, hashes2)
 	if !equal {
 		t.Fatal(msg)
