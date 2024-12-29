@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -8,27 +10,6 @@ import (
 	"sync"
 	"testing"
 )
-
-// func readLoad(nrOfBlocksPerThread int64) string {
-// 	numThreads = 0
-// 	fileName := "../../datbig"
-// 	start := time.Now()
-// 	hashes := readFile(fileName, 1024, nrOfBlocksPerThread)
-// 	elapsed := time.Since(start)
-// 	createdThreads := numThreads
-// 	numThreads = 0
-// 	return fmt.Sprintf("\nNumber of blocks: %v\nBlocks per thread: %v\nCreated threads: %v\nElapsed: %.3fs\n\n", len(hashes), nrOfBlocksPerThread, createdThreads, elapsed.Seconds())
-// }
-
-// func TestLoad(t *testing.T) {
-// 	var nrBlocks int64 = 512000 * 2
-// 	var msg string
-// 	for nrBlocks != 1 {
-// 		msg += readLoad(nrBlocks)
-// 		nrBlocks = nrBlocks / 2
-// 	}
-// 	t.Log(msg)
-// }
 
 func check(e error) {
 	if e != nil {
@@ -49,16 +30,63 @@ func isEqual(hashes1 []string, hashes2 []string) (bool, string) {
 	return true, ""
 }
 
+type block struct {
+	data []byte
+	hash string
+}
+type blocks []block
+
+func hashme(data []byte) string {
+	hasher := sha256.New()
+	hasher.Write(data)
+	return fmt.Sprintf("%x", hasher.Sum(nil))
+}
+
+func genBytes(item byte, size int) block {
+	chunk := block{data: make([]byte, size)}
+	for i := range chunk.data {
+		chunk.data[i] = item
+	}
+	chunk.hash = hashme(chunk.data)
+	return chunk
+}
+
+func genRandom(size int) block {
+	chunk := block{data: make([]byte, size)}
+	rand.Read(chunk.data)
+	chunk.hash = hashme(chunk.data)
+	return chunk
+}
+
+func writeBlocks(f *os.File, bs blocks) error {
+	for _, b := range bs {
+		_, e := f.Write(b.data)
+		if e != nil {
+			return e
+		}
+	}
+	return nil
+}
+
 func TestReadOneByOne(t *testing.T) {
-	fileName := "../../dat2"
-	var blockSize int64 = 1024 * 1024
-	expected := []string{
-		"bee2a0ac4cf8f4f77117d3e0be917cac8c600dfb99154018ef3cebe392724298",
-		"0bf0567803b83fa4a4202d939365b7dde052af4086eadb19ca9494cb2cb28bf4",
-		"a554c7573c4760d40b2d391557792d9f6588ee3200fef6ff6b34b7bbcb04659d",
+	var blockSize int = 1024 * 1024
+
+	zeroes := genBytes(0, blockSize)
+	ones := genBytes(1, blockSize)
+
+	f, e := os.CreateTemp("", "sal-tst")
+	check(e)
+	fileName := f.Name()
+	defer os.Remove(fileName)
+	writeBlocks(f, blocks{zeroes, ones, zeroes})
+
+	expectedHashes := []string{
+		zeroes.hash,
+		ones.hash,
+		zeroes.hash,
 	}
 
-	f, e := os.Open(fileName)
+	f, e = os.Open(fileName)
 	check(e)
 	nrBlocks := 3
 	hashes := make([]string, nrBlocks)
@@ -67,7 +95,7 @@ func TestReadOneByOne(t *testing.T) {
 	read(f, blockSize, 2, 1, hashes)
 	e = f.Close()
 	check(e)
-	equal, msg := isEqual(hashes, expected)
+	equal, msg := isEqual(hashes, expectedHashes)
 	if !equal {
 		t.Fatal(msg)
 	}
@@ -101,7 +129,7 @@ func TestReadError(t *testing.T) {
 
 func TestReadSmallBuffer(t *testing.T) {
 	data := "abcde"
-	var blockSize int64 = 1024 * 1024
+	var blockSize int = 1024 * 1024
 	totalBlocks := getNrOfBlocks(int64(len(data)), blockSize)
 	expected := []string{
 		"36bbe50ed96841d10443bcb670d6554f0a34b761be67ec9c4a8ad2c0c44ca42c",
@@ -116,22 +144,60 @@ func TestReadSmallBuffer(t *testing.T) {
 	}
 }
 
-func TestReadFile(t *testing.T) {
-	fileName := "../../dat2"
-	var blockSize int64 = 1024 * 1024
-	expected := []string{
-		"bee2a0ac4cf8f4f77117d3e0be917cac8c600dfb99154018ef3cebe392724298",
-		"0bf0567803b83fa4a4202d939365b7dde052af4086eadb19ca9494cb2cb28bf4",
-		"a554c7573c4760d40b2d391557792d9f6588ee3200fef6ff6b34b7bbcb04659d",
-		"a92f8625752fb897698b6bcfcdea7b5fb8ca7439dd1307c1c6c85a4de0ec388a",
-		"cf745822a74607477bdb7e7a952941098fd09692c64b7c468d115b1c1a5fdace",
-		"dcf2c240d59f12c3fda471fc54d4451184c90f08981556f61657b51453ab5f7a",
+func TestReadFilePrecise(t *testing.T) {
+	var blockSize int = 1024 * 1024
+
+	input := make(blocks, 6)
+	for i := 0; i < 6; i++ {
+		input[i] = genRandom(blockSize)
 	}
+
+	f, e := os.CreateTemp("", "sal-tst")
+	check(e)
+	fileName := f.Name()
+	defer os.Remove(fileName)
+	writeBlocks(f, input)
+
+	expectedHashes := []string{}
+	for _, item := range input {
+		expectedHashes = append(expectedHashes, item.hash)
+	}
+
 	hashes, e := readFile(fileName, blockSize, 1)
 	if e != nil {
 		t.Fatalf("Error: %v", e.Error())
 	}
-	equal, msg := isEqual(hashes, expected)
+	equal, msg := isEqual(hashes, expectedHashes)
+	if !equal {
+		t.Fatal(msg)
+	}
+}
+
+func TestReadFileHalfblock(t *testing.T) {
+	var blockSize int = 1024 * 1024
+
+	input := make(blocks, 7)
+	for i := range input {
+		input[i] = genRandom(blockSize)
+	}
+	input[6] = genRandom(blockSize / 2)
+
+	f, e := os.CreateTemp("", "sal-tst")
+	check(e)
+	fileName := f.Name()
+	defer os.Remove(fileName)
+	writeBlocks(f, input)
+
+	expectedHashes := []string{}
+	for _, item := range input {
+		expectedHashes = append(expectedHashes, item.hash)
+	}
+
+	hashes, e := readFile(fileName, blockSize, 1)
+	if e != nil {
+		t.Fatalf("Error: %v", e.Error())
+	}
+	equal, msg := isEqual(hashes, expectedHashes)
 	if !equal {
 		t.Fatal(msg)
 	}
@@ -148,28 +214,19 @@ func TestReadMissingFileExec(t *testing.T) {
 	}
 }
 
-func TestReadFileFullBlockFullFile(t *testing.T) {
-	fileName := "../../dat"
-	var blockSize int64 = 1024 * 1024
-	expected := []string{
-		"460960a020fbad248be7e4c93900bbe36bbd371c7bc61e426d3d7748e34acbdf",
-		"075976462a537d4360fe64ddf3e1ef0dd7db14f003aecc630861b57c22bfa518",
-		"e8f1614c60cb143a301b3fc3a9f039a7c10cca6c8a64cd6f52624fdf06970303",
-	}
-
-	hashes, e := readFile(fileName, blockSize, 1)
-	if e != nil {
-		t.Fatalf("Error: %v", e.Error())
-	}
-	equal, msg := isEqual(hashes, expected)
-	if !equal {
-		t.Fatal(msg)
-	}
-}
-
 func TestReadFileMultipleThreads(t *testing.T) {
-	fileName := "../../dat"
-	var blockSize int64 = 1024 * 1024
+	var blockSize int = 1024 * 1024
+
+	input := make(blocks, 20)
+	for i := range input {
+		input[i] = genRandom(blockSize)
+	}
+
+	f, e := os.CreateTemp("", "sal-tst")
+	check(e)
+	fileName := f.Name()
+	defer os.Remove(fileName)
+	writeBlocks(f, input)
 
 	hashes1, e := readFile(fileName, blockSize, 1)
 	if e != nil {

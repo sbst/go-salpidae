@@ -10,7 +10,7 @@ import (
 )
 
 type blockError struct {
-	BlockId int64
+	BlockId int
 	Err     error
 }
 
@@ -20,8 +20,8 @@ func (e *blockError) Error() string {
 
 func (e *blockError) Unwrap() error { return e.Err }
 
-func getNrOfBlocks(size int64, blockSize int64) int64 {
-	return int64(math.Ceil(float64(size) / float64(blockSize)))
+func getNrOfBlocks(size int64, blockSize int) int {
+	return int(math.Ceil(float64(size) / float64(blockSize)))
 }
 
 func getFileSize(fileName string) (int64, error) {
@@ -37,12 +37,12 @@ func getFileSize(fileName string) (int64, error) {
 	return info.Size(), nil
 }
 
-func skipBlocks(file *os.File, blockSize int64, nrOfBlocks int64) error {
-	_, e := file.Seek(blockSize*nrOfBlocks, io.SeekStart)
+func skipBlocks(file *os.File, blockSize int, nrOfBlocks int) error {
+	_, e := file.Seek(int64(blockSize)*int64(nrOfBlocks), io.SeekStart)
 	return e
 }
 
-func read(reader io.Reader, blockSize int64, startBlockId int64, nrBlocks int64, result []string) error {
+func read(reader io.Reader, blockSize int, startBlockId int, nrBlocks int, result []string) error {
 	hasher := sha256.New()
 	block := make([]byte, blockSize)
 	curBlockId := startBlockId
@@ -51,7 +51,7 @@ func read(reader io.Reader, blockSize int64, startBlockId int64, nrBlocks int64,
 		if n == 0 && e == io.EOF {
 			break
 		} else if e == io.ErrUnexpectedEOF {
-			block = block[0:int64(n)]
+			block = block[0:n]
 			e = nil
 		} else if e != nil {
 			return &blockError{curBlockId, e}
@@ -94,7 +94,7 @@ func (list *errorList) isEmpty() bool {
 	return len(list.errors) == 0
 }
 
-func readFileExec(fileName string, blockSize int64, startBlockId int64, nrBlocks int64, errors *errorList, wait *sync.WaitGroup, result []string) {
+func readFileExec(fileName string, blockSize int, startBlockId int, nrBlocks int, errors *errorList, wait *sync.WaitGroup, result []string) {
 	defer wait.Done()
 	f, e := os.Open(fileName)
 	if e != nil {
@@ -116,7 +116,7 @@ func readFileExec(fileName string, blockSize int64, startBlockId int64, nrBlocks
 	}
 }
 
-func readFile(fileName string, blockSize int64, nrBlocksPerThread int64) ([]string, error) {
+func readFile(fileName string, blockSize int, nrBlocksPerThread int) ([]string, error) {
 	var wait = sync.WaitGroup{}
 	fileSize, e := getFileSize(fileName)
 	if e != nil {
@@ -125,7 +125,7 @@ func readFile(fileName string, blockSize int64, nrBlocksPerThread int64) ([]stri
 	var errors errorList
 	nrBlocksTotal := getNrOfBlocks(fileSize, blockSize)
 	hashes := make([]string, nrBlocksTotal)
-	var processedBlocks int64 = 0
+	var processedBlocks int = 0
 	for processedBlocks < nrBlocksTotal && errors.isEmpty() {
 		wait.Add(1)
 		go readFileExec(fileName, blockSize, processedBlocks, nrBlocksPerThread, &errors, &wait, hashes)
