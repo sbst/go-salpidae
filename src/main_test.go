@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -133,6 +134,17 @@ func TestReadFile(t *testing.T) {
 	equal, msg := isEqual(hashes, expected)
 	if !equal {
 		t.Fatal(msg)
+	}
+}
+
+func TestReadMissingFileExec(t *testing.T) {
+	var errs errorList
+	var wg sync.WaitGroup
+	var result []string
+	wg.Add(1)
+	readFileExec("aa", 1, 1, 1, &errs, &wg, result)
+	if errs.isEmpty() || errs.get(0) == nil {
+		t.Fatalf("Error expected")
 	}
 }
 

@@ -68,21 +68,50 @@ func read(reader io.Reader, blockSize int64, startBlockId int64, nrBlocks int64,
 	return nil
 }
 
-func readFileExec(fileName string, blockSize int64, startBlockId int64, nrBlocks int64, wait *sync.WaitGroup, result []string) {
+type errorList struct {
+	mutex  sync.Mutex
+	errors []error
+}
+
+func (list *errorList) add(err error) {
+	list.mutex.Lock()
+	defer list.mutex.Unlock()
+	list.errors = append(list.errors, err)
+}
+
+func (list *errorList) get(i uint) error {
+	list.mutex.Lock()
+	defer list.mutex.Unlock()
+	if i+1 <= uint(len(list.errors)) {
+		return list.errors[i]
+	}
+	return nil
+}
+
+func (list *errorList) isEmpty() bool {
+	list.mutex.Lock()
+	defer list.mutex.Unlock()
+	return len(list.errors) == 0
+}
+
+func readFileExec(fileName string, blockSize int64, startBlockId int64, nrBlocks int64, errors *errorList, wait *sync.WaitGroup, result []string) {
 	defer wait.Done()
 	f, e := os.Open(fileName)
 	if e != nil {
+		errors.add(e)
 		return
 	}
 	defer f.Close()
 
 	e = skipBlocks(f, blockSize, startBlockId)
 	if e != nil {
+		errors.add(e)
 		return
 	}
 
 	e = read(f, blockSize, startBlockId, nrBlocks, result)
 	if e != nil {
+		errors.add(e)
 		return
 	}
 }
@@ -93,16 +122,18 @@ func readFile(fileName string, blockSize int64, nrBlocksPerThread int64) ([]stri
 	if e != nil {
 		return make([]string, 0), e
 	}
+	var errors errorList
 	nrBlocksTotal := getNrOfBlocks(fileSize, blockSize)
 	hashes := make([]string, nrBlocksTotal)
 	var processedBlocks int64 = 0
-	for processedBlocks < nrBlocksTotal {
+	for processedBlocks < nrBlocksTotal && errors.isEmpty() {
 		wait.Add(1)
-		go readFileExec(fileName, blockSize, processedBlocks, nrBlocksPerThread, &wait, hashes)
+		go readFileExec(fileName, blockSize, processedBlocks, nrBlocksPerThread, &errors, &wait, hashes)
 		processedBlocks += nrBlocksPerThread
 	}
 	wait.Wait()
-	return hashes, nil
+
+	return hashes, errors.get(0)
 }
 
 func main() {
