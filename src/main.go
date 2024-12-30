@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/sha256"
+	"flag"
 	"fmt"
 	"io"
 	"math"
@@ -116,12 +117,8 @@ func readFileExec(fileName string, blockSize int, startBlockId int, nrBlocks int
 	}
 }
 
-func readFile(fileName string, blockSize int, nrBlocksPerThread int) ([]string, error) {
+func readFile(fileName string, fileSize int64, blockSize int, nrBlocksPerThread int) ([]string, error) {
 	var wait = sync.WaitGroup{}
-	fileSize, e := getFileSize(fileName)
-	if e != nil {
-		return make([]string, 0), e
-	}
 	var errors errorList
 	nrBlocksTotal := getNrOfBlocks(fileSize, blockSize)
 	hashes := make([]string, nrBlocksTotal)
@@ -136,6 +133,62 @@ func readFile(fileName string, blockSize int, nrBlocksPerThread int) ([]string, 
 	return hashes, errors.get(0)
 }
 
+func writeFile(fileName string, signature []string) error {
+	f, e := os.Create(fileName)
+	if e != nil {
+		return e
+	}
+	defer f.Close()
+
+	for _, hash := range signature {
+		_, e = f.WriteString(hash + "\n")
+		if e != nil {
+			return e
+		}
+	}
+	return nil
+}
+
 func main() {
-	fmt.Println("ok")
+	const nrThreads int = 30
+
+	var fileInput string
+	flag.StringVar(&fileInput, "i", "", "file for signature generation")
+	var fileOutput string
+	flag.StringVar(&fileOutput, "o", "", "file for signature output")
+	blockSizeM := flag.Int("b", 1, "size of block in MB")
+	flag.Parse()
+
+	if len(fileInput) == 0 {
+		fmt.Fprintf(os.Stderr, "'-i' input file argument is missing\n")
+		os.Exit(1)
+	}
+	if len(fileOutput) == 0 {
+		fmt.Fprintf(os.Stderr, "'-o' output file argument is missing\n")
+		os.Exit(1)
+	}
+
+	if *blockSizeM <= 0 {
+		fmt.Fprintf(os.Stderr, "Unsupported block size\n")
+		os.Exit(1)
+	}
+
+	blockSize := int((*blockSizeM) * 1024 * 1024)
+	fileSize, e := getFileSize(fileInput)
+	if e != nil {
+		fmt.Fprintf(os.Stderr, "Unable to read input file: %v\n", e.Error())
+		os.Exit(1)
+	}
+	nrBlocksPerThread := (getNrOfBlocks(fileSize, blockSize) / nrThreads) + 1
+	signature, e := readFile(fileInput, fileSize, blockSize, nrBlocksPerThread)
+	if e != nil {
+		fmt.Fprintf(os.Stderr, "Unable to hash input file: %v\n", e.Error())
+		os.Exit(1)
+	}
+
+	e = writeFile(fileOutput, signature)
+	if e != nil {
+		fmt.Fprintf(os.Stderr, "Unable to write output: %v\n", e.Error())
+		os.Exit(1)
+	}
 }

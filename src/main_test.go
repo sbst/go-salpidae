@@ -58,14 +58,16 @@ func genRandom(size int) block {
 	return chunk
 }
 
-func writeBlocks(f *os.File, bs blocks) error {
+func writeBlocks(f *os.File, bs blocks) (int64, error) {
+	var size int64 = 0
 	for _, b := range bs {
-		_, e := f.Write(b.data)
+		n, e := f.Write(b.data)
 		if e != nil {
-			return e
+			return 0, e
 		}
+		size += int64(n)
 	}
-	return nil
+	return size, nil
 }
 
 func TestReadOneByOne(t *testing.T) {
@@ -156,14 +158,15 @@ func TestReadFilePrecise(t *testing.T) {
 	check(e)
 	fileName := f.Name()
 	defer os.Remove(fileName)
-	writeBlocks(f, input)
+	size, e := writeBlocks(f, input)
+	check(e)
 
 	expectedHashes := []string{}
 	for _, item := range input {
 		expectedHashes = append(expectedHashes, item.hash)
 	}
 
-	hashes, e := readFile(fileName, blockSize, 1)
+	hashes, e := readFile(fileName, size, blockSize, 1)
 	if e != nil {
 		t.Fatalf("Error: %v", e.Error())
 	}
@@ -186,14 +189,15 @@ func TestReadFileHalfblock(t *testing.T) {
 	check(e)
 	fileName := f.Name()
 	defer os.Remove(fileName)
-	writeBlocks(f, input)
+	size, e := writeBlocks(f, input)
+	check(e)
 
 	expectedHashes := []string{}
 	for _, item := range input {
 		expectedHashes = append(expectedHashes, item.hash)
 	}
 
-	hashes, e := readFile(fileName, blockSize, 1)
+	hashes, e := readFile(fileName, size, blockSize, 1)
 	if e != nil {
 		t.Fatalf("Error: %v", e.Error())
 	}
@@ -226,13 +230,14 @@ func TestReadFileMultipleThreads(t *testing.T) {
 	check(e)
 	fileName := f.Name()
 	defer os.Remove(fileName)
-	writeBlocks(f, input)
+	size, e := writeBlocks(f, input)
+	check(e)
 
-	hashes1, e := readFile(fileName, blockSize, 1)
+	hashes1, e := readFile(fileName, size, blockSize, 1)
 	if e != nil {
 		t.Fatalf("Error: %v", e.Error())
 	}
-	hashes2, e := readFile(fileName, blockSize, 100)
+	hashes2, e := readFile(fileName, size, blockSize, 100)
 	if e != nil {
 		t.Fatalf("Error: %v", e.Error())
 	}
