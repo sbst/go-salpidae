@@ -43,28 +43,23 @@ func skipBlocks(file *os.File, blockSize int, nrOfBlocks int) error {
 	return e
 }
 
-func read(reader io.Reader, blockSize int, startBlockId int, nrBlocks int, result []string) error {
+func read(reader io.ReaderAt, blockSize int, startBlock int, nrBlocks int, result []string) error {
+	lastBlock := startBlock + nrBlocks
 	hasher := sha256.New()
-	block := make([]byte, blockSize)
-	curBlockId := startBlockId
-	for nrBlocks > 0 {
-		n, e := io.ReadFull(reader, block)
-		if n == 0 && e == io.EOF {
-			break
-		} else if e == io.ErrUnexpectedEOF {
-			block = block[0:n]
-			e = nil
-		} else if e != nil {
-			return &blockError{curBlockId, e}
-		}
-		_, e = hasher.Write(block)
+	for curBlock := startBlock; curBlock < lastBlock; curBlock++ {
+		offset := curBlock * blockSize
+		bSection := io.NewSectionReader(reader, int64(offset), int64(blockSize))
+
+		_, e := io.Copy(hasher, bSection)
+		// if n == 0 {
+		// 	// log - block calculation problem, must not be reachable
+		// 	break
+		// }
 		if e != nil {
-			return &blockError{curBlockId, e}
+			return e
 		}
-		result[curBlockId] = fmt.Sprintf("%x", hasher.Sum(nil))
+		result[curBlock] = fmt.Sprintf("%x", hasher.Sum(nil))
 		hasher.Reset()
-		curBlockId += 1
-		nrBlocks -= 1
 	}
 	return nil
 }
@@ -95,41 +90,32 @@ func (list *errorList) isEmpty() bool {
 	return len(list.errors) == 0
 }
 
-func readFileExec(fileName string, blockSize int, startBlockId int, nrBlocks int, errors *errorList, wait *sync.WaitGroup, result []string) {
-	defer wait.Done()
-	f, e := os.Open(fileName)
-	if e != nil {
-		errors.add(e)
-		return
-	}
-	defer f.Close()
-
-	e = skipBlocks(f, blockSize, startBlockId)
-	if e != nil {
-		errors.add(e)
-		return
-	}
-
-	e = read(f, blockSize, startBlockId, nrBlocks, result)
-	if e != nil {
-		errors.add(e)
-		return
-	}
-}
-
-func readFile(fileName string, fileSize int64, blockSize int, nrBlocksPerThread int) ([]string, error) {
+func readFile(reader io.ReaderAt, size int64, blockSize int, nrBlocksPerThread int) ([]string, error) {
 	var wait = sync.WaitGroup{}
 	var errors errorList
-	nrBlocksTotal := getNrOfBlocks(fileSize, blockSize)
-	hashes := make([]string, nrBlocksTotal)
+
+	totalBlocks := getNrOfBlocks(size, blockSize)
+	hashes := make([]string, totalBlocks)
+	if nrBlocksPerThread > totalBlocks {
+		nrBlocksPerThread = totalBlocks
+		// log - too many blocks per thread for full file, limit to totalBlocks
+	}
 	var processedBlocks int = 0
-	for processedBlocks < nrBlocksTotal && errors.isEmpty() {
+	for processedBlocks < totalBlocks && errors.isEmpty() {
+		if processedBlocks+nrBlocksPerThread > totalBlocks {
+			nrBlocksPerThread = totalBlocks - processedBlocks
+			// log - too much blocks per thread for last block, limit to remain blocks (totalBlocks - processedBlocks)
+		}
 		wait.Add(1)
-		go readFileExec(fileName, blockSize, processedBlocks, nrBlocksPerThread, &errors, &wait, hashes)
+		go func(startBlock int, nrBlocks int) {
+			defer wait.Done()
+			if e := read(reader, blockSize, startBlock, nrBlocks, hashes); e != nil {
+				errors.add(e)
+			}
+		}(processedBlocks, nrBlocksPerThread)
 		processedBlocks += nrBlocksPerThread
 	}
 	wait.Wait()
-
 	return hashes, errors.get(0)
 }
 
@@ -179,8 +165,14 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Unable to read input file: %v\n", e.Error())
 		os.Exit(1)
 	}
+	file, e := os.Open(fileInput)
+	if e != nil {
+		fmt.Fprintf(os.Stderr, "Unable to read input file: %v\n", e.Error())
+		os.Exit(1)
+	}
+	defer file.Close()
 	nrBlocksPerThread := (getNrOfBlocks(fileSize, blockSize) / nrThreads) + 1
-	signature, e := readFile(fileInput, fileSize, blockSize, nrBlocksPerThread)
+	signature, e := readFile(file, fileSize, blockSize, nrBlocksPerThread)
 	if e != nil {
 		fmt.Fprintf(os.Stderr, "Unable to hash input file: %v\n", e.Error())
 		os.Exit(1)

@@ -1,13 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
 	"strings"
-	"sync"
 	"testing"
 )
 
@@ -107,7 +107,7 @@ type customReader struct {
 	cb func() (int, error)
 }
 
-func (e customReader) Read(p []byte) (n int, err error) {
+func (e customReader) ReadAt(p []byte, offset int64) (n int, err error) {
 	return e.cb()
 }
 
@@ -127,6 +127,84 @@ func TestReadError(t *testing.T) {
 	} else {
 		t.Fatal("Error expected")
 	}
+}
+
+// type Signature struct {
+// 	hashes []string
+// }
+
+// type Buffer struct {
+// 	b []byte
+// }
+
+// func (w *Signature) WriteAt(b []byte, off int64) (n int, err error) {
+// 	e := int(off) + len(b)
+
+// 	if cap(w.b)*5/4 <= e {
+// 		t := make([]byte, e)
+// 		copy(t, w.b)
+// 		w.b = t
+// 	} else {
+// 		for cap(w.b) < e {
+// 			w.b = append(w.b[:cap(w.b)], 0, 0, 0, 0)
+// 		}
+// 	}
+
+// 	w.b = w.b[:e]
+
+// 	n = copy(w.b[off:], b)
+
+// 	return n, nil
+// }
+
+func TestReadCombinedSource(t *testing.T) {
+	var blockSize int = 1
+	const nrBlocksPerThreadConst = 3
+
+	data := []byte{0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9}
+
+	bReader := bytes.NewReader(data)
+	bResult, e := readFile(bReader, int64(len(data)), blockSize, nrBlocksPerThreadConst)
+	check(e)
+
+	input := make(blocks, 10)
+	for i := 0; i < 10; i++ {
+		input[i].data = []byte{data[i]}
+		input[i].hash = hashme(input[i].data)
+	}
+	f, e := os.CreateTemp("", "sal-tst")
+	check(e)
+	fileName := f.Name()
+	defer os.Remove(fileName)
+	_, e = writeBlocks(f, input)
+	f.Close()
+	check(e)
+
+	fReader, e := os.Open("../../../dat")
+	check(e)
+	defer fReader.Close()
+	info, _ := fReader.Stat()
+
+	fResult, e := readFile(bReader, info.Size(), blockSize, nrBlocksPerThreadConst)
+	check(e)
+
+	if len(input) != len(fResult) {
+		t.Fatalf("Different result sizes: input - %v, buffer - %v", len(input), len(fResult))
+	}
+	if len(bResult) != len(fResult) {
+		t.Fatalf("Different result sizes: buffer - %v, file - %v", len(bResult), len(fResult))
+	}
+	for i, _ := range input {
+		if input[i].hash != bResult[i] {
+			t.Fatalf("Different sum, block %v: input - %s, buffer - %s", i, input[i].hash, fResult[i])
+		}
+		if bResult[i] != fResult[i] {
+			t.Fatalf("Different sum, block %v: buffer - %s, file - %s", i, bResult[i], fResult[i])
+		}
+	}
+	// for i, _ := range bResult {
+	// 	t.Logf("[%v]: %s", i, bResult[i])
+	// }
 }
 
 func TestReadSmallBuffer(t *testing.T) {
@@ -159,6 +237,7 @@ func TestReadFilePrecise(t *testing.T) {
 	fileName := f.Name()
 	defer os.Remove(fileName)
 	size, e := writeBlocks(f, input)
+	f.Close()
 	check(e)
 
 	expectedHashes := []string{}
@@ -166,7 +245,10 @@ func TestReadFilePrecise(t *testing.T) {
 		expectedHashes = append(expectedHashes, item.hash)
 	}
 
-	hashes, e := readFile(fileName, size, blockSize, 1)
+	f, e = os.Open(fileName)
+	check(e)
+	defer f.Close()
+	hashes, e := readFile(f, size, blockSize, 1)
 	if e != nil {
 		t.Fatalf("Error: %v", e.Error())
 	}
@@ -191,30 +273,23 @@ func TestReadFileHalfblock(t *testing.T) {
 	defer os.Remove(fileName)
 	size, e := writeBlocks(f, input)
 	check(e)
+	f.Close()
 
 	expectedHashes := []string{}
 	for _, item := range input {
 		expectedHashes = append(expectedHashes, item.hash)
 	}
 
-	hashes, e := readFile(fileName, size, blockSize, 1)
+	f, e = os.Open(fileName)
+	check(e)
+	defer f.Close()
+	hashes, e := readFile(f, size, blockSize, 1)
 	if e != nil {
 		t.Fatalf("Error: %v", e.Error())
 	}
 	equal, msg := isEqual(hashes, expectedHashes)
 	if !equal {
 		t.Fatal(msg)
-	}
-}
-
-func TestReadMissingFileExec(t *testing.T) {
-	var errs errorList
-	var wg sync.WaitGroup
-	var result []string
-	wg.Add(1)
-	readFileExec("aa", 1, 1, 1, &errs, &wg, result)
-	if errs.isEmpty() || errs.get(0) == nil {
-		t.Fatalf("Error expected")
 	}
 }
 
@@ -232,12 +307,20 @@ func TestReadFileMultipleThreads(t *testing.T) {
 	defer os.Remove(fileName)
 	size, e := writeBlocks(f, input)
 	check(e)
+	f.Close()
 
-	hashes1, e := readFile(fileName, size, blockSize, 1)
+	file1, e := os.Open(fileName)
+	check(e)
+	defer file1.Close()
+	hashes1, e := readFile(file1, size, blockSize, 1)
 	if e != nil {
 		t.Fatalf("Error: %v", e.Error())
 	}
-	hashes2, e := readFile(fileName, size, blockSize, 100)
+
+	file2, e := os.Open(fileName)
+	check(e)
+	defer file2.Close()
+	hashes2, e := readFile(file2, size, blockSize, 100)
 	if e != nil {
 		t.Fatalf("Error: %v", e.Error())
 	}
