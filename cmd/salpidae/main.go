@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/sha256"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -38,11 +39,6 @@ func getFileSize(fileName string) (int64, error) {
 	return info.Size(), nil
 }
 
-func skipBlocks(file *os.File, blockSize int, nrOfBlocks int) error {
-	_, e := file.Seek(int64(blockSize)*int64(nrOfBlocks), io.SeekStart)
-	return e
-}
-
 func read(reader io.ReaderAt, blockSize int, startBlock int, nrBlocks int, result []string) error {
 	lastBlock := startBlock + nrBlocks
 	hasher := sha256.New()
@@ -50,13 +46,13 @@ func read(reader io.ReaderAt, blockSize int, startBlock int, nrBlocks int, resul
 		offset := curBlock * blockSize
 		bSection := io.NewSectionReader(reader, int64(offset), int64(blockSize))
 
-		_, e := io.Copy(hasher, bSection)
-		// if n == 0 {
-		// 	// log - block calculation problem, must not be reachable
-		// 	break
-		// }
+		n, e := io.Copy(hasher, bSection)
+		if n == 0 {
+			// log - block calculation problem, must not be reachable
+			return &blockError{curBlock, errors.New("zero copy")}
+		}
 		if e != nil {
-			return e
+			return &blockError{curBlock, e}
 		}
 		result[curBlock] = fmt.Sprintf("%x", hasher.Sum(nil))
 		hasher.Reset()
