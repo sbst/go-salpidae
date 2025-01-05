@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net/http"
 	"os"
+	"strconv"
 	"sync"
 )
 
@@ -144,7 +146,6 @@ func handleFile(fileInput string, fileOutput string, blockSizeM int) error {
 	file, e := os.Open(fileInput)
 	if e != nil {
 		// log "Unable to read input file: %v\n", e.Error()
-		fmt.Fprintf(os.Stderr, "Unable to read input file: %v\n", e.Error())
 		return e
 	}
 	defer file.Close()
@@ -161,6 +162,60 @@ func handleFile(fileInput string, fileOutput string, blockSizeM int) error {
 		return e
 	}
 	return nil
+}
+
+// TODO: json error
+// TODO: json response
+func post(res http.ResponseWriter, req *http.Request) {
+	blockSizeMStr := req.PostFormValue("blocksize")
+	blockSizeM, e := strconv.Atoi(blockSizeMStr)
+	if e != nil {
+		http.Error(res, "Unexpected format of block size", http.StatusBadRequest)
+		return
+	}
+
+	if blockSizeM <= 0 || blockSizeM > 2047 {
+		http.Error(res, "Unsupported block size", http.StatusBadRequest)
+		return
+	}
+
+	file, header, e := req.FormFile("data")
+	if e != nil {
+		http.Error(res, "Unable to read data", http.StatusBadRequest)
+		return
+	}
+	defer req.MultipartForm.RemoveAll()
+
+	blockSize := blockSizeM * 1024 * 1024
+	fileSize := header.Size
+
+	nrBlocksPerThread := (getNrOfBlocks(header.Size, blockSize) / nrThreads) + 1
+	signature, e := readFile(file, fileSize, blockSize, nrBlocksPerThread)
+	if e != nil {
+		http.Error(res, "Unable to hash input file", http.StatusBadRequest)
+		return
+	}
+	for _, hash := range signature {
+		fmt.Fprintln(res, hash)
+	}
+}
+
+func get(res http.ResponseWriter, req *http.Request) {
+	// TODO: impl
+	fmt.Fprintf(res, "get\n")
+}
+
+func del(res http.ResponseWriter, req *http.Request) {
+	// TODO: impl
+	fmt.Fprintf(res, "delete\n")
+}
+
+func handleServer() {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /signature", get)
+	mux.HandleFunc("POST /signature", post)
+	mux.HandleFunc("DELETE /signature", del)
+	http.ListenAndServe(":8080", mux)
 }
 
 func main() {
@@ -189,7 +244,7 @@ func main() {
 
 	if !isServer {
 		if e := handleFile(fileInput, fileOutput, *blockSizeM); e != nil {
-			fmt.Printf("Unable to process file: %v\n", e.Error())
+			fmt.Fprintf(os.Stderr, "Unable to hash input file: %v\n", e.Error())
 			os.Exit(1)
 		}
 	}
