@@ -180,7 +180,7 @@ func TestReadCombinedSource(t *testing.T) {
 	f.Close()
 	check(e)
 
-	fReader, e := os.Open("../../../dat")
+	fReader, e := os.Open(fileName)
 	check(e)
 	defer fReader.Close()
 	info, _ := fReader.Stat()
@@ -329,3 +329,7 @@ func TestReadFileMultipleThreads(t *testing.T) {
 		t.Fatal(msg)
 	}
 }
+
+// func TestSmth(t *testing.T) {
+// 	handleServer()
+// }
