@@ -150,7 +150,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if *blockSizeM <= 0 {
+	if *blockSizeM <= 0 || *blockSizeM > 2047 {
 		fmt.Fprintf(os.Stderr, "Unsupported block size\n")
 		os.Exit(1)
 	}
