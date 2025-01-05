@@ -131,8 +131,40 @@ func writeFile(fileName string, signature []string) error {
 	return nil
 }
 
+const nrThreads int = 30
+
+func handleFile(fileInput string, fileOutput string, blockSizeM int) error {
+
+	blockSize := blockSizeM * 1024 * 1024
+	fileSize, e := getFileSize(fileInput)
+	if e != nil {
+		// log "Unable to read input file size: %v\n", e.Error()
+		return e
+	}
+	file, e := os.Open(fileInput)
+	if e != nil {
+		// log "Unable to read input file: %v\n", e.Error()
+		fmt.Fprintf(os.Stderr, "Unable to read input file: %v\n", e.Error())
+		return e
+	}
+	defer file.Close()
+	nrBlocksPerThread := (getNrOfBlocks(fileSize, blockSize) / nrThreads) + 1
+	signature, e := readFile(file, fileSize, blockSize, nrBlocksPerThread)
+	if e != nil {
+		// log "Unable to hash input file: %v\n", e.Error()
+		return e
+	}
+
+	e = writeFile(fileOutput, signature)
+	if e != nil {
+		// log "Unable to write output: %v\n", e.Error()
+		return e
+	}
+	return nil
+}
+
 func main() {
-	const nrThreads int = 30
+	isServer := false
 
 	var fileInput string
 	flag.StringVar(&fileInput, "i", "", "file for signature generation")
@@ -155,28 +187,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	blockSize := int((*blockSizeM) * 1024 * 1024)
-	fileSize, e := getFileSize(fileInput)
-	if e != nil {
-		fmt.Fprintf(os.Stderr, "Unable to read input file: %v\n", e.Error())
-		os.Exit(1)
-	}
-	file, e := os.Open(fileInput)
-	if e != nil {
-		fmt.Fprintf(os.Stderr, "Unable to read input file: %v\n", e.Error())
-		os.Exit(1)
-	}
-	defer file.Close()
-	nrBlocksPerThread := (getNrOfBlocks(fileSize, blockSize) / nrThreads) + 1
-	signature, e := readFile(file, fileSize, blockSize, nrBlocksPerThread)
-	if e != nil {
-		fmt.Fprintf(os.Stderr, "Unable to hash input file: %v\n", e.Error())
-		os.Exit(1)
-	}
-
-	e = writeFile(fileOutput, signature)
-	if e != nil {
-		fmt.Fprintf(os.Stderr, "Unable to write output: %v\n", e.Error())
-		os.Exit(1)
+	if !isServer {
+		if e := handleFile(fileInput, fileOutput, *blockSizeM); e != nil {
+			fmt.Printf("Unable to process file: %v\n", e.Error())
+			os.Exit(1)
+		}
 	}
 }
