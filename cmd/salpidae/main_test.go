@@ -129,34 +129,6 @@ func TestReadError(t *testing.T) {
 	}
 }
 
-// type Signature struct {
-// 	hashes []string
-// }
-
-// type Buffer struct {
-// 	b []byte
-// }
-
-// func (w *Signature) WriteAt(b []byte, off int64) (n int, err error) {
-// 	e := int(off) + len(b)
-
-// 	if cap(w.b)*5/4 <= e {
-// 		t := make([]byte, e)
-// 		copy(t, w.b)
-// 		w.b = t
-// 	} else {
-// 		for cap(w.b) < e {
-// 			w.b = append(w.b[:cap(w.b)], 0, 0, 0, 0)
-// 		}
-// 	}
-
-// 	w.b = w.b[:e]
-
-// 	n = copy(w.b[off:], b)
-
-// 	return n, nil
-// }
-
 func TestReadCombinedSource(t *testing.T) {
 	var blockSize int = 1
 	const nrBlocksPerThreadConst = 3
@@ -329,7 +301,3 @@ func TestReadFileMultipleThreads(t *testing.T) {
 		t.Fatal(msg)
 	}
 }
-
-// func TestSmth(t *testing.T) {
-// 	handleServer()
-// }
