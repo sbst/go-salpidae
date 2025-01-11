@@ -1,4 +1,4 @@
-package main
+package salpidae
 
 import (
 	"bytes"
@@ -119,7 +119,7 @@ func TestReadError(t *testing.T) {
 	hashes := make([]string, 0)
 	e := read(reader, 1, 0, 1, hashes)
 
-	var expected *blockError
+	var expected *BlockError
 	if errors.As(e, &expected) {
 		if expected.BlockId != 0 {
 			t.Fatalf("Error in block: %v, expected: 0", expected.BlockId)
@@ -136,7 +136,7 @@ func TestReadCombinedSource(t *testing.T) {
 	data := []byte{0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9}
 
 	bReader := bytes.NewReader(data)
-	bResult, e := readFile(bReader, int64(len(data)), blockSize, nrBlocksPerThreadConst)
+	bResult, e := ReadFile(bReader, int64(len(data)), blockSize, nrBlocksPerThreadConst)
 	check(e)
 
 	input := make(blocks, 10)
@@ -157,7 +157,7 @@ func TestReadCombinedSource(t *testing.T) {
 	defer fReader.Close()
 	info, _ := fReader.Stat()
 
-	fResult, e := readFile(bReader, info.Size(), blockSize, nrBlocksPerThreadConst)
+	fResult, e := ReadFile(bReader, info.Size(), blockSize, nrBlocksPerThreadConst)
 	check(e)
 
 	if len(input) != len(fResult) {
@@ -182,7 +182,7 @@ func TestReadCombinedSource(t *testing.T) {
 func TestReadSmallBuffer(t *testing.T) {
 	data := "abcde"
 	var blockSize int = 1024 * 1024
-	totalBlocks := getNrOfBlocks(int64(len(data)), blockSize)
+	totalBlocks := GetNrOfBlocks(int64(len(data)), blockSize)
 	expected := []string{
 		"36bbe50ed96841d10443bcb670d6554f0a34b761be67ec9c4a8ad2c0c44ca42c",
 	}
@@ -220,7 +220,7 @@ func TestReadFilePrecise(t *testing.T) {
 	f, e = os.Open(fileName)
 	check(e)
 	defer f.Close()
-	hashes, e := readFile(f, size, blockSize, 1)
+	hashes, e := ReadFile(f, size, blockSize, 1)
 	if e != nil {
 		t.Fatalf("Error: %v", e.Error())
 	}
@@ -255,7 +255,7 @@ func TestReadFileHalfblock(t *testing.T) {
 	f, e = os.Open(fileName)
 	check(e)
 	defer f.Close()
-	hashes, e := readFile(f, size, blockSize, 1)
+	hashes, e := ReadFile(f, size, blockSize, 1)
 	if e != nil {
 		t.Fatalf("Error: %v", e.Error())
 	}
@@ -284,7 +284,7 @@ func TestReadFileMultipleThreads(t *testing.T) {
 	file1, e := os.Open(fileName)
 	check(e)
 	defer file1.Close()
-	hashes1, e := readFile(file1, size, blockSize, 1)
+	hashes1, e := ReadFile(file1, size, blockSize, 1)
 	if e != nil {
 		t.Fatalf("Error: %v", e.Error())
 	}
@@ -292,7 +292,7 @@ func TestReadFileMultipleThreads(t *testing.T) {
 	file2, e := os.Open(fileName)
 	check(e)
 	defer file2.Close()
-	hashes2, e := readFile(file2, size, blockSize, 100)
+	hashes2, e := ReadFile(file2, size, blockSize, 100)
 	if e != nil {
 		t.Fatalf("Error: %v", e.Error())
 	}
