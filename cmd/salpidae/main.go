@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -136,7 +137,6 @@ func writeFile(fileName string, signature []string) error {
 const nrThreads int = 30
 
 func handleFile(fileInput string, fileOutput string, blockSizeM int) error {
-
 	blockSize := blockSizeM * 1024 * 1024
 	fileSize, e := getFileSize(fileInput)
 	if e != nil {
@@ -164,24 +164,45 @@ func handleFile(fileInput string, fileOutput string, blockSizeM int) error {
 	return nil
 }
 
-// TODO: json error
-// TODO: json response
-func post(res http.ResponseWriter, req *http.Request) {
+type response struct {
+	Error     string
+	Signature []string
+}
+
+func write(writer http.ResponseWriter, signature []string) {
+	res := response{Error: "", Signature: signature}
+	if jres, e := json.Marshal(res); e == nil {
+		fmt.Fprintln(writer, string(jres))
+	} else {
+		http.Error(writer, "", http.StatusInternalServerError)
+	}
+}
+
+func writeError(writer http.ResponseWriter, message string) {
+	res := response{Error: message, Signature: []string{}}
+	if jres, e := json.Marshal(res); e == nil {
+		fmt.Fprintln(writer, string(jres))
+	} else {
+		http.Error(writer, "", http.StatusInternalServerError)
+	}
+}
+
+func post(writer http.ResponseWriter, req *http.Request) {
 	blockSizeMStr := req.PostFormValue("blocksize")
 	blockSizeM, e := strconv.Atoi(blockSizeMStr)
 	if e != nil {
-		http.Error(res, "Unexpected format of block size", http.StatusBadRequest)
+		writeError(writer, "Unexpected format of block size")
 		return
 	}
 
 	if blockSizeM <= 0 || blockSizeM > 2047 {
-		http.Error(res, "Unsupported block size", http.StatusBadRequest)
+		writeError(writer, "Unsupported block size")
 		return
 	}
 
 	file, header, e := req.FormFile("data")
 	if e != nil {
-		http.Error(res, "Unable to read data", http.StatusBadRequest)
+		writeError(writer, "Unable to read data")
 		return
 	}
 	defer req.MultipartForm.RemoveAll()
@@ -192,57 +213,49 @@ func post(res http.ResponseWriter, req *http.Request) {
 	nrBlocksPerThread := (getNrOfBlocks(header.Size, blockSize) / nrThreads) + 1
 	signature, e := readFile(file, fileSize, blockSize, nrBlocksPerThread)
 	if e != nil {
-		http.Error(res, "Unable to hash input file", http.StatusBadRequest)
+		writeError(writer, "Unable to hash input file")
 		return
 	}
-	for _, hash := range signature {
-		fmt.Fprintln(res, hash)
-	}
+	write(writer, signature)
 }
 
-func get(res http.ResponseWriter, req *http.Request) {
-	// TODO: impl
-	fmt.Fprintf(res, "get\n")
-}
-
-func del(res http.ResponseWriter, req *http.Request) {
-	// TODO: impl
-	fmt.Fprintf(res, "delete\n")
-}
-
-func handleServer() {
+func handleServer(port uint) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /signature", get)
 	mux.HandleFunc("POST /signature", post)
-	mux.HandleFunc("DELETE /signature", del)
-	http.ListenAndServe(":8080", mux)
+	http.ListenAndServe(fmt.Sprintf(":%d", port), mux)
 }
 
 func main() {
-	isServer := false
-
 	var fileInput string
 	flag.StringVar(&fileInput, "i", "", "file for signature generation")
 	var fileOutput string
 	flag.StringVar(&fileOutput, "o", "", "file for signature output")
+	port := flag.Uint("s", 0, "start server on the port")
 	blockSizeM := flag.Int("b", 1, "size of block in MB")
 	flag.Parse()
 
-	if len(fileInput) == 0 {
-		fmt.Fprintf(os.Stderr, "'-i' input file argument is missing\n")
+	isServer := *port != 0
+	isFile := len(fileInput) != 0 || len(fileOutput) != 0
+	if isServer && isFile {
+		fmt.Fprintf(os.Stderr, "'-s' and '-i/-o' are mutually exclusive\n")
 		os.Exit(1)
 	}
-	if len(fileOutput) == 0 {
-		fmt.Fprintf(os.Stderr, "'-o' output file argument is missing\n")
-		os.Exit(1)
-	}
+	if isServer {
+		handleServer(*port)
+	} else if isFile {
+		if len(fileInput) == 0 {
+			fmt.Fprintf(os.Stderr, "'-i' input file argument is missing\n")
+			os.Exit(1)
+		}
+		if len(fileOutput) == 0 {
+			fmt.Fprintf(os.Stderr, "'-o' output file argument is missing\n")
+			os.Exit(1)
+		}
 
-	if *blockSizeM <= 0 || *blockSizeM > 2047 {
-		fmt.Fprintf(os.Stderr, "Unsupported block size\n")
-		os.Exit(1)
-	}
-
-	if !isServer {
+		if *blockSizeM <= 0 || *blockSizeM > 2047 {
+			fmt.Fprintf(os.Stderr, "Unsupported block size\n")
+			os.Exit(1)
+		}
 		if e := handleFile(fileInput, fileOutput, *blockSizeM); e != nil {
 			fmt.Fprintf(os.Stderr, "Unable to hash input file: %v\n", e.Error())
 			os.Exit(1)
