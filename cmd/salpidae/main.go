@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -9,7 +10,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
+	"time"
 )
 
 func getFileSize(fileName string) (int64, error) {
@@ -114,10 +118,16 @@ func post(writer http.ResponseWriter, req *http.Request) {
 	write(writer, signature)
 }
 
-func handleServer(port uint) {
+func startServer(port uint) *http.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /signature", post)
-	http.ListenAndServe(fmt.Sprintf(":%d", port), mux)
+	server := &http.Server{Addr: fmt.Sprintf(":%d", port), Handler: mux}
+	go func() {
+		if err := server.ListenAndServe(); err != http.ErrServerClosed {
+			log.Printf("Aborting server: %v\n", err)
+		}
+	}()
+	return server
 }
 
 func getLogWriter(logOutput string, def io.Writer) io.Writer {
@@ -128,6 +138,16 @@ func getLogWriter(logOutput string, def io.Writer) io.Writer {
 		}
 	}
 	return logWriter
+}
+
+func getLogPrefix(isFile bool, isServer bool) string {
+	if isFile {
+		return "[File] "
+	}
+	if isServer {
+		return "[Server] "
+	}
+	return ""
 }
 
 func main() {
@@ -148,14 +168,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	log.SetOutput(getLogWriter(logOutput, os.Stdout))
-	log.Println("Salpidae starting...")
-
-	if isServer {
-		log.SetPrefix("[Server] ")
-		handleServer(*port)
-	} else if isFile {
-		log.SetPrefix("[File] ")
+	if isFile {
 		if len(fileInput) == 0 {
 			fmt.Fprintf(os.Stderr, "'-i' input file argument is missing\n")
 			os.Exit(1)
@@ -169,9 +182,35 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Unsupported block size\n")
 			os.Exit(1)
 		}
-		if e := handleFile(fileInput, fileOutput, *blockSizeM); e != nil {
-			fmt.Fprintf(os.Stderr, "Unable to hash input file: %v\n", e.Error())
-			os.Exit(1)
+	}
+
+	log.SetOutput(getLogWriter(logOutput, os.Stdout))
+	log.SetPrefix(getLogPrefix(isFile, isServer))
+	log.Println("**********Salpidae starting**********")
+
+	errExit := false
+	if isServer {
+		server := startServer(*port)
+		stop := make(chan os.Signal, 1)
+		signal.Notify(stop, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+		log.Println("Waiting for interrupt...")
+		<-stop
+
+		log.Println("Stopping...")
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := server.Shutdown(ctx); err != nil {
+			log.Printf("Server shutdown error: %v\n", err.Error())
+			errExit = true
 		}
+	} else if isFile {
+		if e := handleFile(fileInput, fileOutput, *blockSizeM); e != nil {
+			log.Printf("Unable to hash input file %v\n", e.Error())
+			errExit = true
+		}
+	}
+	log.Println("**********Salpidae done**********")
+	if errExit {
+		os.Exit(1)
 	}
 }
