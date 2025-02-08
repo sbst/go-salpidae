@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"sync"
 )
 
@@ -28,7 +29,7 @@ func read(reader io.ReaderAt, blockSize int, startBlock int, nrBlocks int, resul
 
 		n, e := io.Copy(hasher, bSection)
 		if n == 0 {
-			// log - block calculation problem, must not be reachable
+			log.Printf("Block calculation problem\n")
 			return &BlockError{curBlock, errors.New("zero copy")}
 		}
 		if e != nil {
@@ -74,13 +75,13 @@ func ReadFile(reader io.ReaderAt, size int64, blockSize int, nrBlocksPerThread i
 	hashes := make([]string, totalBlocks)
 	if nrBlocksPerThread > totalBlocks {
 		nrBlocksPerThread = totalBlocks
-		// log - too many blocks per thread for full file, limit to totalBlocks
+		log.Printf("Too many blocks per thread for full file, limiting to %d\n", totalBlocks)
 	}
 	var processedBlocks int = 0
 	for processedBlocks < totalBlocks && errors.isEmpty() {
 		if processedBlocks+nrBlocksPerThread > totalBlocks {
 			nrBlocksPerThread = totalBlocks - processedBlocks
-			// log - too much blocks per thread for last block, limit to remain blocks (totalBlocks - processedBlocks)
+			log.Printf("Too many blocks per thread for last block, limiting to remain blocks %d\n", totalBlocks-processedBlocks)
 		}
 		wait.Add(1)
 		go func(startBlock int, nrBlocks int) {

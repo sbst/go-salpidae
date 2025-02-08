@@ -166,7 +166,7 @@ func TestReadCombinedSource(t *testing.T) {
 	if len(bResult) != len(fResult) {
 		t.Fatalf("Different result sizes: buffer - %v, file - %v", len(bResult), len(fResult))
 	}
-	for i, _ := range input {
+	for i := range input {
 		if input[i].hash != bResult[i] {
 			t.Fatalf("Different sum, block %v: input - %s, buffer - %s", i, input[i].hash, fResult[i])
 		}
